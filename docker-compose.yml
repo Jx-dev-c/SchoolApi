@@ -1,0 +1,26 @@
+services:
+  localstack:
+    image: localstack/localstack:3
+    container_name: schoolapi-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEBUG=1
+    volumes:
+      - "./localstack-data:/var/lib/localstack"
+
+  postgres:
+    image: postgres:16
+    container_name: schoolapi-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=schooldb
+      - POSTGRES_USER=school
+      - POSTGRES_PASSWORD=school123
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:

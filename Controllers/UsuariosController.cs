@@ -39,7 +39,7 @@ namespace SchoolApi.Controllers
         [HttpPost]
         public async Task<ActionResult<Usuario>> Create(Usuario usuario)
         {
-            usuario.DataCriacao = DateTime.Now;
+            usuario.DataCriacao = DateTime.UtcNow;
             _context.Usuarios.Add(usuario);
             await _context.SaveChangesAsync();
 
