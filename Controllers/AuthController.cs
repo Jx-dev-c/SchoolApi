@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,12 +17,18 @@ public class AuthController : ControllerBase
     private readonly AppDbContext _contexto;
     private readonly ServicoDeToken _tokens;
     private readonly IPasswordHasher<Usuario> _hasher;
+    private readonly ILogger<AuthController> _log;
 
-    public AuthController(AppDbContext contexto, ServicoDeToken tokens, IPasswordHasher<Usuario> hasher)
+    public AuthController(
+        AppDbContext contexto,
+        ServicoDeToken tokens,
+        IPasswordHasher<Usuario> hasher,
+        ILogger<AuthController> log)
     {
         _contexto = contexto;
         _tokens = tokens;
         _hasher = hasher;
+        _log = log;
     }
 
     /// <summary>Troca e-mail e senha por um par de tokens.</summary>
@@ -31,6 +38,7 @@ public class AuthController : ControllerBase
     /// </remarks>
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting("login")]
     public async Task<ActionResult<SessaoResponse>> Login(LoginRequest requisicao, CancellationToken ct)
     {
         var usuario = await _contexto.Usuarios
@@ -41,12 +49,14 @@ public class AuthController : ControllerBase
             // gasta o mesmo tempo de um hash real mesmo sem usuário, para o
             // tempo de resposta não revelar se o e-mail existe
             _hasher.HashPassword(new Usuario { Nome = "-", Email = "-", SenhaHash = "-" }, requisicao.Senha);
+            _log.LogInformation("Tentativa de login sem conta correspondente");
             return Unauthorized(new ProblemDetails { Title = "E-mail ou senha inválidos", Status = 401 });
         }
 
         var resultado = _hasher.VerifyHashedPassword(usuario, usuario.SenhaHash, requisicao.Senha);
         if (resultado == PasswordVerificationResult.Failed)
         {
+            _log.LogWarning("Senha inválida para o usuario {UsuarioId}", usuario.Id);
             return Unauthorized(new ProblemDetails { Title = "E-mail ou senha inválidos", Status = 401 });
         }
 
@@ -56,6 +66,7 @@ public class AuthController : ControllerBase
             usuario.SenhaHash = _hasher.HashPassword(usuario, requisicao.Senha);
         }
 
+        _log.LogInformation("Login do usuario {UsuarioId} ({Papel})", usuario.Id, usuario.Papel);
         return Ok(await AbrirSessaoAsync(usuario, ct));
     }
 
@@ -75,15 +86,33 @@ public class AuthController : ControllerBase
             return Unauthorized(new ProblemDetails { Title = "Refresh token inválido", Status = 401 });
         }
 
-        // Token já usado (ou revogado) sendo apresentado de novo é sinal de
-        // roubo: derruba a família inteira em vez de só recusar este uso.
-        if (!token.Ativo)
+        // Expirado é diferente de revogado. Tratar os dois como roubo derrubava
+        // as sessões vivas de quem só passou uma semana sem abrir o sistema.
+        if (token.RevogadoEm is null && DateTime.UtcNow >= token.ExpiraEm)
         {
+            return Unauthorized(new ProblemDetails { Title = "Refresh token expirado", Status = 401 });
+        }
+
+        // Token já revogado sendo apresentado de novo é sinal de cópia: derruba
+        // a família inteira, em vez de só recusar este uso.
+        if (token.RevogadoEm is not null)
+        {
+            _log.LogWarning(
+                "Refresh token revogado reapresentado (usuario {UsuarioId}); todas as sessões foram encerradas",
+                token.UsuarioId);
             await RevogarTodosAsync(token.UsuarioId, ct);
             return Unauthorized(new ProblemDetails { Title = "Sessão encerrada por segurança", Status = 401 });
         }
 
         var sessao = await AbrirSessaoAsync(token.Usuario, ct, tokenAnterior: token);
+        if (sessao is null)
+        {
+            // outra requisição rotacionou este mesmo token entre a leitura e a
+            // escrita: quem perdeu a corrida não emite par novo
+            _log.LogWarning("Corrida no refresh do usuario {UsuarioId}: rotação já feita por outra requisição", token.UsuarioId);
+            return Unauthorized(new ProblemDetails { Title = "Refresh token inválido", Status = 401 });
+        }
+
         return Ok(sessao);
     }
 
@@ -110,20 +139,39 @@ public class AuthController : ControllerBase
         var usuarioId = User.ObterUsuarioId();
         var usuario = usuarioId is null ? null : await _contexto.Usuarios.FindAsync([usuarioId.Value], ct);
 
-        return usuario is null
+        // `Ativo` aqui é o que faz a desativação valer de imediato para o
+        // front: sem isso, a tela seguia achando que a sessão era boa.
+        return usuario is null || !usuario.Ativo
             ? Unauthorized()
             : Ok(new UsuarioLogadoResponse(usuario.Id, usuario.Nome, usuario.Email, usuario.Papel, usuario.ProfessorId, usuario.AlunoId));
     }
 
-    private async Task<SessaoResponse> AbrirSessaoAsync(Usuario usuario, CancellationToken ct, RefreshToken? tokenAnterior = null)
+    /// <summary>
+    /// Emite um par novo. Devolve `null` quando a rotação perdeu a corrida para
+    /// outra requisição — nesse caso nada é emitido.
+    /// </summary>
+    private async Task<SessaoResponse?> AbrirSessaoAsync(Usuario usuario, CancellationToken ct, RefreshToken? tokenAnterior = null)
     {
         var (accessToken, expiraEm) = _tokens.GerarAccessToken(usuario);
         var (refreshToken, hash, expiraRefresh) = _tokens.GerarRefreshToken();
 
         if (tokenAnterior is not null)
         {
-            tokenAnterior.RevogadoEm = DateTime.UtcNow;
-            tokenAnterior.SubstituidoPor = hash;
+            // `WHERE RevogadoEm IS NULL` no próprio UPDATE: o banco decide quem
+            // rotaciona. Ler o estado e escrever depois deixava duas requisições
+            // simultâneas passarem, cada uma com um par válido — e o alarme de
+            // reuso nunca disparava.
+            var linhasAfetadas = await _contexto.RefreshTokens
+                .Where(t => t.Id == tokenAnterior.Id && t.RevogadoEm == null)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.RevogadoEm, DateTime.UtcNow)
+                          .SetProperty(x => x.SubstituidoPor, hash),
+                    ct);
+
+            if (linhasAfetadas == 0)
+            {
+                return null;
+            }
         }
 
         _contexto.RefreshTokens.Add(new RefreshToken
