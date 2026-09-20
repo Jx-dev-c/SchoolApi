@@ -1,8 +1,10 @@
 ﻿using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -38,11 +40,37 @@ builder.Services.AddOptions<OpcoesJwt>()
 builder.Services.AddSingleton<ServicoDeToken>();
 builder.Services.AddSingleton<IPasswordHasher<Usuario>, PasswordHasher<Usuario>>();
 
+// 210 mil iteracoes e a recomendacao atual do OWASP para PBKDF2-HMAC-SHA512;
+// o padrao do framework (100 mil) e de uma recomendacao anterior
+builder.Services.Configure<PasswordHasherOptions>(opcoes => opcoes.IterationCount = 210_000);
+
+// Forca bruta em login nao e so risco de senha: cada tentativa custa uma
+// derivacao PBKDF2 no servidor, entao vira negacao de servico barata.
+builder.Services.AddRateLimiter(opcoes =>
+{
+    opcoes.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    opcoes.AddPolicy("login", contexto => RateLimitPartition.GetFixedWindowLimiter(
+        contexto.Connection.RemoteIpAddress?.ToString() ?? "desconhecido",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        }));
+});
+
+// Erro nao tratado vira ProblemDetails com traceId, em vez de 500 vazio
+builder.Services.AddProblemDetails();
+
 var opcoesJwt = builder.Configuration.GetSection(OpcoesJwt.Secao).Get<OpcoesJwt>() ?? new OpcoesJwt();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opcoes =>
     {
+        // fora de desenvolvimento o cabecalho WWW-Authenticate nao detalha por
+        // que o token falhou (expirado, issuer errado): isso e oraculo pra quem
+        // esta testando token forjado
+        opcoes.IncludeErrorDetails = builder.Environment.IsDevelopment();
         opcoes.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -108,6 +136,8 @@ using (var escopo = app.Services.CreateScope())
     }
 }
 
+app.UseExceptionHandler();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -124,6 +154,7 @@ app.UseCors("AppAngular");
 
 // A ordem importa: autenticação descobre quem é, autorização decide o que pode.
 // Antes havia UseAuthorization sozinho, o que não protegia nada.
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
