@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -53,8 +53,14 @@ public class MatriculasController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        // só matrícula ativa conta como duplicata: quem cancelou precisa poder
+        // se rematricular, e a contagem de vagas já ignora as canceladas
         var jaMatriculado = await _contexto.Matriculas
-            .AnyAsync(m => m.AlunoId == requisicao.AlunoId && m.TurmaId == requisicao.TurmaId, ct);
+            .AnyAsync(
+                m => m.AlunoId == requisicao.AlunoId
+                     && m.TurmaId == requisicao.TurmaId
+                     && m.Situacao == SituacaoMatricula.Ativa,
+                ct);
         if (jaMatriculado)
         {
             return Conflict(new ProblemDetails
@@ -134,7 +140,9 @@ public class MatriculasController : ControllerBase
         }
 
         decimal? media = dados.Notas.Count > 0
-            ? Math.Round(dados.Notas.Sum(n => n.Valor) / dados.Notas.Count, 2)
+            // AwayFromZero: 7,225 vira 7,23. O padrão do .NET é arredondamento
+            // bancário (7,22), que não é o que uma escola espera num boletim
+            ? Math.Round(dados.Notas.Sum(n => n.Valor) / dados.Notas.Count, 2, MidpointRounding.AwayFromZero)
             : null;
 
         double? frequencia = dados.Presencas > 0

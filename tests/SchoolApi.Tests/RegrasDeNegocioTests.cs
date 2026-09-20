@@ -27,12 +27,12 @@ public class RegrasDeNegocioTests
         var cliente = await _api.ClienteAdminAsync();
 
         var turma = await CriarTurmaAsync(cliente, capacidade: 1);
-        var (primeiro, segundo) = await DoisAlunosNovosAsync(cliente);
+        var alunos = await AlunosNovosAsync(cliente, quantidade: 2);
 
-        var entrou = await cliente.PostAsJsonAsync("/api/matriculas", new { alunoId = primeiro, turmaId = turma });
+        var entrou = await cliente.PostAsJsonAsync("/api/matriculas", new { alunoId = alunos[0], turmaId = turma });
         entrou.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var recusado = await cliente.PostAsJsonAsync("/api/matriculas", new { alunoId = segundo, turmaId = turma });
+        var recusado = await cliente.PostAsJsonAsync("/api/matriculas", new { alunoId = alunos[1], turmaId = turma });
         recusado.StatusCode.Should().Be(HttpStatusCode.Conflict);
     }
 
@@ -42,19 +42,50 @@ public class RegrasDeNegocioTests
         var cliente = await _api.ClienteAdminAsync();
 
         var turma = await CriarTurmaAsync(cliente, capacidade: 1);
-        var (primeiro, segundo) = await DoisAlunosNovosAsync(cliente);
+        var alunos = await AlunosNovosAsync(cliente, quantidade: 10);
 
-        // contar e depois inserir é corrida: as duas requisições leem "0 de 1"
-        // e as duas inserem. A trava é no banco (FOR UPDATE na linha da turma).
-        var respostas = await Task.WhenAll(
-            cliente.PostAsJsonAsync("/api/matriculas", new { alunoId = primeiro, turmaId = turma }),
-            cliente.PostAsJsonAsync("/api/matriculas", new { alunoId = segundo, turmaId = turma }));
+        // Dez requisições soltas ao mesmo tempo, e não duas: com duas, a janela
+        // entre contar e gravar (~7 ms) é maior que a diferença de chegada, e o
+        // teste passava mesmo sem a trava no banco — dava verde com o bug.
+        var largada = new TaskCompletionSource();
+        var tentativas = alunos.Select(async alunoId =>
+        {
+            await largada.Task;
+            return await cliente.PostAsJsonAsync("/api/matriculas", new { alunoId, turmaId = turma });
+        }).ToArray();
+
+        largada.SetResult();
+        var respostas = await Task.WhenAll(tentativas);
 
         respostas.Count(r => r.StatusCode == HttpStatusCode.Created).Should().Be(1);
-        respostas.Count(r => r.StatusCode == HttpStatusCode.Conflict).Should().Be(1);
+        respostas.Count(r => r.StatusCode == HttpStatusCode.Conflict).Should().Be(alunos.Count - 1);
 
         var matriculados = await _api.ComContextoAsync(c => c.Matriculas.CountAsync(m => m.TurmaId == turma));
         matriculados.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Cadastros_simultaneos_com_o_mesmo_email_nao_viram_erro_interno()
+    {
+        var cliente = await _api.ClienteAdminAsync();
+        var email = $"corrida-{Guid.NewGuid():N}@aluno.test";
+
+        // a checagem "já existe esse e-mail?" passa nas dez ao mesmo tempo; o
+        // índice único barra as nove seguintes, e isso tem que virar 409, nunca
+        // um 500 com traceId
+        var largada = new TaskCompletionSource();
+        var tentativas = Enumerable.Range(0, 10).Select(async i =>
+        {
+            await largada.Task;
+            return await cliente.PostAsJsonAsync("/api/alunos",
+                new { nome = $"Corrida {i}", email, dataNascimento = "2010-01-01" });
+        }).ToArray();
+
+        largada.SetResult();
+        var respostas = await Task.WhenAll(tentativas);
+
+        respostas.Should().NotContain(r => r.StatusCode == HttpStatusCode.InternalServerError);
+        respostas.Count(r => r.StatusCode == HttpStatusCode.Created).Should().Be(1);
     }
 
     [Fact]
@@ -63,7 +94,7 @@ public class RegrasDeNegocioTests
         var cliente = await _api.ClienteAdminAsync();
 
         var turma = await CriarTurmaAsync(cliente, capacidade: 5);
-        var (aluno, _) = await DoisAlunosNovosAsync(cliente);
+        var aluno = (await AlunosNovosAsync(cliente, quantidade: 1))[0];
 
         await cliente.PostAsJsonAsync("/api/matriculas", new { alunoId = aluno, turmaId = turma });
         var repetida = await cliente.PostAsJsonAsync("/api/matriculas", new { alunoId = aluno, turmaId = turma });
@@ -142,10 +173,10 @@ public class RegrasDeNegocioTests
         return turma!.Id;
     }
 
-    private async Task<(int Primeiro, int Segundo)> DoisAlunosNovosAsync(HttpClient cliente)
+    private async Task<IReadOnlyList<int>> AlunosNovosAsync(HttpClient cliente, int quantidade)
     {
         var ids = new List<int>();
-        for (var i = 0; i < 2; i++)
+        for (var i = 0; i < quantidade; i++)
         {
             var resposta = await cliente.PostAsJsonAsync("/api/alunos", new
             {
@@ -158,7 +189,7 @@ public class RegrasDeNegocioTests
             ids.Add(aluno!.Id);
         }
 
-        return (ids[0], ids[1]);
+        return ids;
     }
 }
 

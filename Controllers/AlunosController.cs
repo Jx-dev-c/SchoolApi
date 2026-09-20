@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
+using SchoolApi.Auth;
 using SchoolApi.Dtos;
 using SchoolApi.Models;
 
@@ -36,9 +37,19 @@ public class AlunosController : ControllerBase
     {
         var consulta = _contexto.Alunos.AsNoTracking();
 
+        // Professor vê só quem é aluno dele. Sem isto ele lia o cadastro da
+        // escola inteira — nome, e-mail e data de nascimento de menor de idade
+        // em turma alheia. A regra já existia para turmas e faltava aqui.
+        if (!User.EhAdmin() && User.ObterProfessorId() is int professorId)
+        {
+            consulta = consulta.Where(a => a.Matriculas.Any(m => m.Turma!.ProfessorId == professorId));
+        }
+
         if (!string.IsNullOrWhiteSpace(busca))
         {
-            var termo = $"%{busca.Trim()}%";
+            // escapa os curingas do LIKE: `?busca=%` devolvia a tabela inteira
+            var limpo = busca.Trim().Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_");
+            var termo = $"%{limpo}%";
             consulta = consulta.Where(a => EF.Functions.ILike(a.Nome, termo) || EF.Functions.ILike(a.Email, termo));
         }
 
@@ -58,9 +69,14 @@ public class AlunosController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<AlunoResponse>> BuscarPorId(int id, CancellationToken ct)
     {
-        var aluno = await _contexto.Alunos
-            .AsNoTracking()
-            .Where(a => a.Id == id)
+        var consulta = _contexto.Alunos.AsNoTracking().Where(a => a.Id == id);
+
+        if (!User.EhAdmin() && User.ObterProfessorId() is int professorId)
+        {
+            consulta = consulta.Where(a => a.Matriculas.Any(m => m.Turma!.ProfessorId == professorId));
+        }
+
+        var aluno = await consulta
             .Select(a => new AlunoResponse(a.Id, a.Nome, a.Email, a.DataNascimento, a.DataCriacao))
             .FirstOrDefaultAsync(ct);
 
@@ -86,7 +102,21 @@ public class AlunosController : ControllerBase
         };
 
         _contexto.Alunos.Add(aluno);
-        await _contexto.SaveChangesAsync(ct);
+
+        try
+        {
+            await _contexto.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException excecao) when (excecao.EhConflito())
+        {
+            // duas requisições com o mesmo e-mail ao mesmo tempo: a checagem
+            // acima passa nas duas e o índice único barra a segunda
+            return Conflict(new ProblemDetails
+            {
+                Title = "Já existe aluno com esse e-mail",
+                Status = StatusCodes.Status409Conflict,
+            });
+        }
 
         var resposta = new AlunoResponse(aluno.Id, aluno.Nome, aluno.Email, aluno.DataNascimento, aluno.DataCriacao);
         return CreatedAtAction(nameof(BuscarPorId), new { id = aluno.Id }, resposta);

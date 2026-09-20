@@ -13,7 +13,9 @@ namespace SchoolApi.Dtos;
 /// </remarks>
 public class ParametrosDePagina
 {
-    [Range(1, int.MaxValue)]
+    // teto explícito, e não int.MaxValue: `(Pagina - 1) * Tamanho` estourava o
+    // inteiro e virava OFFSET negativo, que o Postgres recusa com erro 500
+    [Range(1, 100_000)]
     public int Pagina { get; set; } = 1;
 
     /// <summary>Teto de 100 para o cliente não pedir a tabela inteira.</summary>
