@@ -160,6 +160,16 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Endpoint de saúde: é o que o compose, o orquestrador e a plataforma de
+// deploy consultam para saber se pode mandar tráfego. Consulta o banco de
+// propósito — API de pé com banco fora não está saudável.
+app.MapGet("/health", async (AppDbContext contexto, CancellationToken ct) =>
+    await contexto.Database.CanConnectAsync(ct)
+        ? Results.Ok(new { status = "saudavel" })
+        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable))
+   .AllowAnonymous()
+   .ExcludeFromDescription();
+
 app.MapControllers();
 
 await app.RunAsync();

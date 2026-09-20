@@ -1,26 +1,46 @@
+# `docker compose up` sobe banco e API prontos para uso, com dados de exemplo.
+# O front tem o compose dele (repositório school-app).
 services:
-  localstack:
-    image: localstack/localstack:3
-    container_name: schoolapi-localstack
-    ports:
-      - "4566:4566"
-    environment:
-      - SERVICES=s3
-      - DEBUG=1
-    volumes:
-      - "./localstack-data:/var/lib/localstack"
-
   postgres:
     image: postgres:16
     container_name: schoolapi-postgres
     ports:
       - "5433:5432"
     environment:
-      - POSTGRES_DB=schooldb
-      - POSTGRES_USER=school
-      - POSTGRES_PASSWORD=school123
+      POSTGRES_DB: schooldb
+      POSTGRES_USER: school
+      # senha só de desenvolvimento; em produção vem do ambiente
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-school123}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # a API espera o banco aceitar conexão, em vez de tentar e morrer
+      test: ["CMD-SHELL", "pg_isready -U school -d schooldb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: schoolapi
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5105:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      # dentro da rede do compose o banco atende pelo nome do serviço
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=schooldb;Username=school;Password=${POSTGRES_PASSWORD:-school123}"
+      # chave de desenvolvimento; em produção é variável de ambiente de verdade
+      Jwt__Chave: ${JWT_CHAVE:-chave-de-desenvolvimento-com-mais-de-32-caracteres}
+      Cors__Origens__0: ${CORS_ORIGEM:-http://localhost:4200}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
 volumes:
   postgres-data:

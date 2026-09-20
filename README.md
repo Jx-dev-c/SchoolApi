@@ -22,7 +22,6 @@ Em desenvolvimento a base sobe populada (4 professores, 4 turmas, 48 alunos,
 - .NET 10 / ASP.NET Core
 - Entity Framework Core + Npgsql
 - PostgreSQL 16 (container Docker)
-- LocalStack (simulação de serviços AWS)
 - Swagger / OpenAPI
 
 ## Endpoints
@@ -81,14 +80,19 @@ cd tests/SchoolApi.Tests
 dotnet test
 ```
 
-30 testes de integração que sobem a API inteira contra um PostgreSQL em
+31 testes de integração que sobem a API inteira contra um PostgreSQL em
 container (Testcontainers). Banco em memória não serviria: o provedor InMemory
 do EF não tem índice único, transação nem `FOR UPDATE` — justamente o que
 sustenta as regras desta API.
 
-Dois deles disparam requisições simultâneas de propósito, porque é onde os
-bugs moram: duas renovações com o mesmo refresh token (só uma pode passar) e
-duas matrículas para a última vaga (a turma não pode estourar).
+Três deles disparam requisições simultâneas de propósito, porque é onde os bugs
+moram: renovações com o mesmo refresh token, dez matrículas para a última vaga e
+dez cadastros com o mesmo e-mail.
+
+Esses testes são verificados por mutação: removendo a trava do banco, o teste de
+matrícula falha. A primeira versão dele usava só duas requisições e passava
+mesmo com a trava removida — a janela entre contar e gravar é de milissegundos,
+e duas requisições não competem de verdade.
 
 ## Configuração
 
@@ -104,27 +108,27 @@ sem a chave do JWT — é validação na inicialização, não erro no primeiro 
 
 ## Como executar
 
-**1. Suba a infraestrutura**
+Tudo em container, um comando:
 
 ```bash
 docker compose up -d
 ```
 
-Isso inicia o PostgreSQL na porta `5433` e o LocalStack na `4566`.
+A API sobe em `http://localhost:5105` (Swagger em `/swagger`), aplica as
+migrations sozinha e, em desenvolvimento, popula a base. O banco só recebe
+tráfego depois de passar no healthcheck.
 
-**2. Aplique as migrations**
-
-```bash
-dotnet ef database update
-```
-
-**3. Execute a API**
+Para rodar a API fora do container, durante o desenvolvimento:
 
 ```bash
+docker compose up -d postgres
+dotnet user-secrets set "Jwt:Chave" "<48+ caracteres aleatórios>"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=127.0.0.1;Port=5433;Database=schooldb;Username=school;Password=school123"
 dotnet run
 ```
 
-Disponível em `http://localhost:5105` · Swagger em `http://localhost:5105/swagger`.
+O sistema completo, com o front junto, sobe pelo compose do
+[school-app](https://github.com/Jx-dev-c/school-app).
 
 ## Decisões técnicas
 
@@ -140,6 +144,5 @@ Disponível em `http://localhost:5105` · Swagger em `http://localhost:5105/swag
 
 ## Roadmap
 
-- [ ] Uso do S3 via LocalStack
 - [ ] Validação de dados com Data Annotations
 - [ ] Testes unitários com xUnit
