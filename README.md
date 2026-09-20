@@ -61,6 +61,35 @@ Contas de demonstração (apenas em desenvolvimento), senha `escola@2026`:
 | POST | `/api/usuarios` | Cria conta (valida vínculo com professor ou aluno) |
 | DELETE | `/api/usuarios/{id}` | Desativa a conta e revoga as sessões |
 
+### Alunos e matrículas
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/api/alunos?pagina=1&tamanho=20&busca=ana` | Lista paginada (admin e professor) |
+| POST | `/api/alunos` | Cadastra aluno — apenas admin |
+| POST | `/api/matriculas` | Matricula respeitando a capacidade da turma |
+| GET | `/api/matriculas/{id}/boletim` | Notas, média e frequência |
+| PUT | `/api/matriculas/{id}/notas` | Lança ou corrige a nota de um bimestre |
+
+O boletim é visível para o próprio aluno, o professor daquela turma e o admin.
+Professor só lança nota na turma dele.
+
+## Testes
+
+```bash
+cd tests/SchoolApi.Tests
+dotnet test
+```
+
+30 testes de integração que sobem a API inteira contra um PostgreSQL em
+container (Testcontainers). Banco em memória não serviria: o provedor InMemory
+do EF não tem índice único, transação nem `FOR UPDATE` — justamente o que
+sustenta as regras desta API.
+
+Dois deles disparam requisições simultâneas de propósito, porque é onde os
+bugs moram: duas renovações com o mesmo refresh token (só uma pode passar) e
+duas matrículas para a última vaga (a turma não pode estourar).
+
 ## Configuração
 
 Nada de segredo no repositório. Em desenvolvimento, use user-secrets:
