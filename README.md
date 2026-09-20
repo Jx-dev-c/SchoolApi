@@ -4,6 +4,19 @@ API REST para gerenciamento de usuários de uma instituição de ensino, desenvo
 
 Frontend do projeto: [school-app](https://github.com/Jx-dev-c/school-app) *(Angular)*
 
+## Domínio
+
+`Aluno`, `Professor`, `Turma`, `Matrícula`, `Nota` e `Presença`.
+
+A matrícula liga aluno e turma e é entidade própria, porque carrega dados
+(data, situação); nota e presença penduram nela, já que só fazem sentido dentro
+de uma turma. O banco garante as regras que não podem depender do código:
+e-mail único, um aluno por turma uma vez só, uma nota por bimestre e uma chamada
+por dia.
+
+Em desenvolvimento a base sobe populada (4 professores, 4 turmas, 48 alunos,
+138 notas e 1.840 presenças), com semente fixa — os mesmos números a cada vez.
+
 ## Stack
 
 - .NET 10 / ASP.NET Core
@@ -13,6 +26,16 @@ Frontend do projeto: [school-app](https://github.com/Jx-dev-c/school-app) *(Angu
 - Swagger / OpenAPI
 
 ## Endpoints
+
+### Turmas
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/api/turmas?anoLetivo=2026` | Lista turmas com professor e ocupação |
+| GET | `/api/turmas/{id}` | Busca uma turma |
+| POST | `/api/turmas` | Cria turma (valida professor e nome duplicado no ano) |
+
+### Usuários
 
 | Método | Rota | Descrição |
 |---|---|---|
