@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<Matricula> Matriculas => Set<Matricula>();
     public DbSet<Nota> Notas => Set<Nota>();
     public DbSet<Presenca> Presencas => Set<Presenca>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     /// <summary>
     /// A modelagem fica aqui, e não em atributos espalhados pelas entidades:
@@ -100,9 +101,31 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Usuario>(usuario =>
         {
-            usuario.Property(u => u.Nome).HasMaxLength(120);
-            usuario.Property(u => u.Email).HasMaxLength(160);
+            usuario.Property(u => u.Nome).HasMaxLength(120).IsRequired();
+            usuario.Property(u => u.Email).HasMaxLength(160).IsRequired();
+            usuario.Property(u => u.SenhaHash).HasMaxLength(256).IsRequired();
+            usuario.Property(u => u.Papel).HasConversion<string>().HasMaxLength(20);
             usuario.HasIndex(u => u.Email).IsUnique();
+
+            // a conta aponta para a pessoa do dominio; apagar a pessoa nao pode
+            // deixar a conta orfa apontando pro nada
+            usuario.HasOne(u => u.Professor).WithMany()
+                   .HasForeignKey(u => u.ProfessorId).OnDelete(DeleteBehavior.Restrict);
+            usuario.HasOne(u => u.Aluno).WithMany()
+                   .HasForeignKey(u => u.AlunoId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RefreshToken>(token =>
+        {
+            token.Property(t => t.TokenHash).HasMaxLength(128).IsRequired();
+            token.Property(t => t.SubstituidoPor).HasMaxLength(128);
+            // a busca no refresh e sempre por hash: sem indice, cada renovacao
+            // varreria a tabela inteira
+            token.HasIndex(t => t.TokenHash).IsUnique();
+            token.Ignore(t => t.Ativo);
+
+            token.HasOne(t => t.Usuario).WithMany(u => u.RefreshTokens)
+                 .HasForeignKey(t => t.UsuarioId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

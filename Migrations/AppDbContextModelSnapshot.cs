@@ -174,6 +174,45 @@ namespace SchoolApi.Migrations
                     b.ToTable("Professores");
                 });
 
+            modelBuilder.Entity("SchoolApi.Models.RefreshToken", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CriadoEm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiraEm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RevogadoEm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SubstituidoPor")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("UsuarioId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UsuarioId");
+
+                    b.ToTable("RefreshTokens");
+                });
+
             modelBuilder.Entity("SchoolApi.Models.Turma", b =>
                 {
                     b.Property<int>("Id")
@@ -217,24 +256,46 @@ namespace SchoolApi.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("Cargo")
-                        .HasColumnType("text");
+                    b.Property<int?>("AlunoId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Ativo")
+                        .HasColumnType("boolean");
 
                     b.Property<DateTime>("DataCriacao")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Email")
+                        .IsRequired()
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
                     b.Property<string>("Nome")
+                        .IsRequired()
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
 
+                    b.Property<string>("Papel")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int?>("ProfessorId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SenhaHash")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("AlunoId");
 
                     b.HasIndex("Email")
                         .IsUnique();
+
+                    b.HasIndex("ProfessorId");
 
                     b.ToTable("Usuarios");
                 });
@@ -280,6 +341,17 @@ namespace SchoolApi.Migrations
                     b.Navigation("Matricula");
                 });
 
+            modelBuilder.Entity("SchoolApi.Models.RefreshToken", b =>
+                {
+                    b.HasOne("SchoolApi.Models.Usuario", "Usuario")
+                        .WithMany("RefreshTokens")
+                        .HasForeignKey("UsuarioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Usuario");
+                });
+
             modelBuilder.Entity("SchoolApi.Models.Turma", b =>
                 {
                     b.HasOne("SchoolApi.Models.Professor", "Professor")
@@ -287,6 +359,23 @@ namespace SchoolApi.Migrations
                         .HasForeignKey("ProfessorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Professor");
+                });
+
+            modelBuilder.Entity("SchoolApi.Models.Usuario", b =>
+                {
+                    b.HasOne("SchoolApi.Models.Aluno", "Aluno")
+                        .WithMany()
+                        .HasForeignKey("AlunoId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("SchoolApi.Models.Professor", "Professor")
+                        .WithMany()
+                        .HasForeignKey("ProfessorId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Aluno");
 
                     b.Navigation("Professor");
                 });
@@ -311,6 +400,11 @@ namespace SchoolApi.Migrations
             modelBuilder.Entity("SchoolApi.Models.Turma", b =>
                 {
                     b.Navigation("Matriculas");
+                });
+
+            modelBuilder.Entity("SchoolApi.Models.Usuario", b =>
+                {
+                    b.Navigation("RefreshTokens");
                 });
 #pragma warning restore 612, 618
         }
