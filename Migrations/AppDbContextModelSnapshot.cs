@@ -290,12 +290,16 @@ namespace SchoolApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AlunoId");
+                    b.HasIndex("AlunoId")
+                        .IsUnique()
+                        .HasFilter("\"AlunoId\" IS NOT NULL");
 
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.HasIndex("ProfessorId");
+                    b.HasIndex("ProfessorId")
+                        .IsUnique()
+                        .HasFilter("\"ProfessorId\" IS NOT NULL");
 
                     b.ToTable("Usuarios");
                 });

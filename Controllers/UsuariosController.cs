@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -101,30 +101,58 @@ public class UsuariosController : ControllerBase
             return NotFound();
         }
 
+        // ExecuteUpdate grava na hora; a mudança na entidade só sai no
+        // SaveChanges. Sem transação, falhar no meio deixaria a conta ativa com
+        // as sessões revogadas — estado inconsistente.
+        await using var transacao = await _contexto.Database.BeginTransactionAsync(ct);
+
         usuario.Ativo = false;
         await _contexto.RefreshTokens
             .Where(t => t.UsuarioId == id && t.RevogadoEm == null)
             .ExecuteUpdateAsync(t => t.SetProperty(x => x.RevogadoEm, DateTime.UtcNow), ct);
 
         await _contexto.SaveChangesAsync(ct);
+        await transacao.CommitAsync(ct);
+
         return NoContent();
     }
 
+    /// <summary>
+    /// O vínculo precisa combinar com o papel, nos dois sentidos. Antes só o
+    /// vínculo esperado era checado, então um admin podia ser criado com
+    /// professorId e alunoId preenchidos — e o token dele saía com os dois
+    /// claims, valendo como professor e como aluno na checagem de posse.
+    /// </summary>
     private async Task<(string Campo, string Mensagem)?> ValidarVinculoAsync(CriarUsuarioRequest requisicao, CancellationToken ct)
     {
         switch (requisicao.Papel)
         {
+            case PapelUsuario.Admin when requisicao.ProfessorId is not null || requisicao.AlunoId is not null:
+                return (nameof(requisicao.Papel), "Conta de admin não se vincula a professor nem a aluno");
+
+            case PapelUsuario.Professor when requisicao.AlunoId is not null:
+                return (nameof(requisicao.AlunoId), "Conta de professor não se vincula a aluno");
+
+            case PapelUsuario.Aluno when requisicao.ProfessorId is not null:
+                return (nameof(requisicao.ProfessorId), "Conta de aluno não se vincula a professor");
+
             case PapelUsuario.Professor when requisicao.ProfessorId is null:
                 return (nameof(requisicao.ProfessorId), "Conta de professor precisa estar vinculada a um professor");
 
             case PapelUsuario.Professor when !await _contexto.Professores.AnyAsync(p => p.Id == requisicao.ProfessorId, ct):
                 return (nameof(requisicao.ProfessorId), "Professor não encontrado");
 
+            case PapelUsuario.Professor when await _contexto.Usuarios.AnyAsync(u => u.ProfessorId == requisicao.ProfessorId, ct):
+                return (nameof(requisicao.ProfessorId), "Esse professor já tem conta de acesso");
+
             case PapelUsuario.Aluno when requisicao.AlunoId is null:
                 return (nameof(requisicao.AlunoId), "Conta de aluno precisa estar vinculada a um aluno");
 
             case PapelUsuario.Aluno when !await _contexto.Alunos.AnyAsync(a => a.Id == requisicao.AlunoId, ct):
                 return (nameof(requisicao.AlunoId), "Aluno não encontrado");
+
+            case PapelUsuario.Aluno when await _contexto.Usuarios.AnyAsync(u => u.AlunoId == requisicao.AlunoId, ct):
+                return (nameof(requisicao.AlunoId), "Esse aluno já tem conta de acesso");
 
             default:
                 return null;

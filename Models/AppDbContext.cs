@@ -107,6 +107,12 @@ public class AppDbContext : DbContext
             usuario.Property(u => u.Papel).HasConversion<string>().HasMaxLength(20);
             usuario.HasIndex(u => u.Email).IsUnique();
 
+            // uma conta por pessoa: sem isso, duas credenciais diferentes
+            // enxergavam o mesmo aluno. O filtro permite varias contas sem
+            // vinculo (admins), que ficam com a coluna nula.
+            usuario.HasIndex(u => u.AlunoId).IsUnique().HasFilter("\"AlunoId\" IS NOT NULL");
+            usuario.HasIndex(u => u.ProfessorId).IsUnique().HasFilter("\"ProfessorId\" IS NOT NULL");
+
             // a conta aponta para a pessoa do dominio; apagar a pessoa nao pode
             // deixar a conta orfa apontando pro nada
             usuario.HasOne(u => u.Professor).WithMany()
