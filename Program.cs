@@ -46,6 +46,8 @@ builder.Services.Configure<PasswordHasherOptions>(opcoes => opcoes.IterationCoun
 
 // Forca bruta em login nao e so risco de senha: cada tentativa custa uma
 // derivacao PBKDF2 no servidor, entao vira negacao de servico barata.
+var tentativasDeLogin = builder.Configuration.GetValue("RateLimit:LoginPorMinuto", 5);
+
 builder.Services.AddRateLimiter(opcoes =>
 {
     opcoes.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -53,7 +55,7 @@ builder.Services.AddRateLimiter(opcoes =>
         contexto.Connection.RemoteIpAddress?.ToString() ?? "desconhecido",
         _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 5,
+            PermitLimit = tentativasDeLogin,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
         }));
