@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 using SchoolApi.Dtos;
@@ -8,6 +9,7 @@ namespace SchoolApi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class TurmasController : ControllerBase
 {
     private readonly AppDbContext _contexto;
@@ -77,7 +79,9 @@ public class TurmasController : ControllerBase
         return turma is null ? NotFound() : Ok(turma);
     }
 
+    /// <summary>Criar turma é ato de secretaria, não de professor.</summary>
     [HttpPost]
+    [Authorize(Roles = nameof(PapelUsuario.Admin))]
     public async Task<ActionResult<TurmaResponse>> Criar(CriarTurmaRequest requisicao)
     {
         // o professor precisa existir: sem esta checagem o erro viria do banco

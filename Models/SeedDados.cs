@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace SchoolApi.Models;
 
@@ -29,7 +30,13 @@ public static class SeedDados
         "Silva", "Santos", "Oliveira", "Souza", "Pereira", "Costa", "Almeida", "Ferreira",
     ];
 
-    public static async Task AplicarAsync(AppDbContext contexto, CancellationToken ct = default)
+    /// <summary>Senha das contas de demonstracao. So existe em desenvolvimento.</summary>
+    public const string SenhaDemo = "escola@2026";
+
+    public static async Task AplicarAsync(
+        AppDbContext contexto,
+        IPasswordHasher<Usuario> hasher,
+        CancellationToken ct = default)
     {
         if (await contexto.Alunos.AnyAsync(ct))
         {
@@ -130,6 +137,41 @@ public static class SeedDados
 
         contexto.Notas.AddRange(notas);
         contexto.Presencas.AddRange(presencas);
+        await contexto.SaveChangesAsync(ct);
+
+        await CriarContasAsync(contexto, hasher, professores[0], alunos[0], agora, ct);
+    }
+
+    /// <summary>
+    /// Uma conta por papel, para quem abrir a demonstracao entrar sem se
+    /// cadastrar e ver as tres visoes do sistema.
+    /// </summary>
+    private static async Task CriarContasAsync(
+        AppDbContext contexto,
+        IPasswordHasher<Usuario> hasher,
+        Professor professor,
+        Aluno aluno,
+        DateTime agora,
+        CancellationToken ct)
+    {
+        if (await contexto.Usuarios.AnyAsync(ct))
+        {
+            return;
+        }
+
+        var contas = new List<Usuario>
+        {
+            new() { Nome = "Administracao", Email = "admin@escola.test", SenhaHash = string.Empty, Papel = PapelUsuario.Admin, DataCriacao = agora },
+            new() { Nome = professor.Nome, Email = "professor@escola.test", SenhaHash = string.Empty, Papel = PapelUsuario.Professor, ProfessorId = professor.Id, DataCriacao = agora },
+            new() { Nome = aluno.Nome, Email = "aluno@escola.test", SenhaHash = string.Empty, Papel = PapelUsuario.Aluno, AlunoId = aluno.Id, DataCriacao = agora },
+        };
+
+        foreach (var conta in contas)
+        {
+            conta.SenhaHash = hasher.HashPassword(conta, SenhaDemo);
+        }
+
+        contexto.Usuarios.AddRange(contas);
         await contexto.SaveChangesAsync(ct);
     }
 }

@@ -27,23 +27,51 @@ Em desenvolvimento a base sobe populada (4 professores, 4 turmas, 48 alunos,
 
 ## Endpoints
 
+### Autenticação
+
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/auth/login` | Troca e-mail e senha por access token + refresh token |
+| POST | `/api/auth/refresh` | Renova a sessão (rotaciona o refresh token) |
+| POST | `/api/auth/logout` | Revoga os refresh tokens do usuário |
+| GET | `/api/auth/eu` | Dados do usuário autenticado |
+
+Access token dura 15 minutos; a sessão continua pelo refresh token, que dura 7
+dias, é guardado como hash e é trocado a cada uso. Apresentar um refresh token
+já usado derruba todos os tokens daquele usuário — é o sinal de que alguém
+copiou o token.
+
+Contas de demonstração (apenas em desenvolvimento), senha `escola@2026`:
+`admin@escola.test`, `professor@escola.test`, `aluno@escola.test`.
+
 ### Turmas
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/api/turmas?anoLetivo=2026` | Lista turmas com professor e ocupação |
+| GET | `/api/turmas?anoLetivo=2026` | Lista turmas com professor e ocupação (autenticado) |
 | GET | `/api/turmas/{id}` | Busca uma turma |
-| POST | `/api/turmas` | Cria turma (valida professor e nome duplicado no ano) |
+| POST | `/api/turmas` | Cria turma — apenas admin |
 
-### Usuários
+### Usuários (apenas admin)
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/api/usuarios` | Lista todos os usuários |
-| GET | `/api/usuarios/{id}` | Busca um usuário por ID |
-| POST | `/api/usuarios` | Cria um novo usuário |
-| PUT | `/api/usuarios/{id}` | Atualiza um usuário |
-| DELETE | `/api/usuarios/{id}` | Remove um usuário |
+| GET | `/api/usuarios` | Lista contas |
+| GET | `/api/usuarios/{id}` | Busca uma conta |
+| POST | `/api/usuarios` | Cria conta (valida vínculo com professor ou aluno) |
+| DELETE | `/api/usuarios/{id}` | Desativa a conta e revoga as sessões |
+
+## Configuração
+
+Nada de segredo no repositório. Em desenvolvimento, use user-secrets:
+
+```bash
+dotnet user-secrets set "Jwt:Chave" "<48+ caracteres aleatórios>"
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=127.0.0.1;Port=5433;Database=schooldb;Username=school;Password=<senha>"
+```
+
+Em produção, as mesmas chaves vêm de variável de ambiente. A aplicação não sobe
+sem a chave do JWT — é validação na inicialização, não erro no primeiro login.
 
 ## Como executar
 
