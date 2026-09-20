@@ -23,6 +23,12 @@ public record TurmaResponse(
     int AnoLetivo,
     int Capacidade,
     int Matriculados,
-    int VagasDisponiveis,
     string ProfessorNome,
-    string Disciplina);
+    string Disciplina)
+{
+    /// <summary>
+    /// Calculado aqui, não na consulta: repetir a contagem no SELECT gerava
+    /// duas subqueries idênticas por turma, o dobro do trabalho no banco.
+    /// </summary>
+    public int VagasDisponiveis => Capacidade - Matriculados;
+}
